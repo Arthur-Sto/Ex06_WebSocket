@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Gartic Test</title>
+    <link rel="stylesheet" href="cliente.css">
+</head>
+
+<body>
+    
+ <body>
+    <div class="top-bar">
+        <span>
+            Você está... <strong><span id="status">Desconectado</span></strong> &nbsp;|&nbsp; Qual o seu nome?
+        </span>
+        <input type="text" placeholder="Nome" id="nome">
+        <button id="btnPassar" onclick="passarVez()" style="display: none;">Passar a Vez</button>
+    </div>
+
+    <div class="main-container">
+        
+        <div>
+            <button onclick="desfazer()" style="display: block; margin-bottom: 15px;">Desfazer (Undo)</button>
+            <canvas id="whiteboard" width="1250" height="500">
+                Seu navegador não suporta o elemento canvas.
+            </canvas>
+        </div>
+
+        <div class="chat-container">
+            <h1>Mensagens</h1>
+
+            <div id="mensagens"></div>
+
+            <div class="chat-input-area">
+                <input type="text" id="mensagem" placeholder="Digite uma mensagem...">
+                <button onclick="enviarChat()">Enviar</button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- SCRIPT DA LOUSA -->
+    <script>
+        const caixa = document.getElementById("mensagem");
+
+        caixa.onkeydown = (event) => {
+            if (event.key === "Enter") {
+                enviarChat();
+            }
+        };
+
+        const canvas = document.getElementById("whiteboard");
+        const ctx = canvas.getContext("2d");
+        let desenhando = false;
+        let historico = [];
+        
+        let podeDesenhar = false;
+
+        canvas.onmousedown = (e) => {
+            if (!podeDesenhar) return; 
+
+            historico.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+            desenhando = true;
+            ctx.beginPath();
+            ctx.moveTo(e.offsetX, e.offsetY);
+        };
+
+        canvas.onmousemove = (e) => {
+            if (desenhando && podeDesenhar) {
+                ctx.lineTo(e.offsetX, e.offsetY);
+                ctx.stroke();
+            }
+        };
+
+        canvas.onmouseup = () => {
+            if (!podeDesenhar) return; 
+
+            desenhando = false; 
+            enviarDesenho();
+        }
+
+        function desfazer() {
+            if (!podeDesenhar) return; 
+
+            if (historico.length > 0) {
+                let fotoAnterior = historico.pop();
+                ctx.putImageData(fotoAnterior, 0, 0);
+                enviarDesenho();
+            } else {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+    </script>
+
+    <!-- SCRIPT DO WEBSOCKET -->
+    <script>
+        const socket = new WebSocket("ws://localhost:8080");
+
+        socket.onopen = function() {
+            document.getElementById("status").textContent = "Conectado";
+            console.log("Conectado ao servidor");
+        };
+
+        socket.onmessage = function(event) {
+           const dados = JSON.parse(event.data);
+
+            if (dados.tipo === "chat") {
+                const div = document.getElementById("mensagens");
+                div.innerHTML += "<p style='margin: 5px 0;'>" + dados.texto + "</p>";
+                div.scrollTop = div.scrollHeight;
+            
+            } else if (dados.tipo === "desenho") {
+                const img = new Image();
+                    
+                img.onload = function() {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0);
+                };
+                img.src = dados.desenho;
+                console.log("Desenho recebido e colado na lousa.");
+            
+            } else if (dados.tipo === "sistema") {
+                podeDesenhar = dados.pode_desenhar;
+                const btnPassar = document.getElementById("btnPassar"); 
+                
+                if (podeDesenhar) {
+                    alert("Você é o desenhista da vez!");
+                    btnPassar.style.display = "block"; 
+                } else {
+                    btnPassar.style.display = "none";  
+                }
+            }
+        };
+
+        socket.onerror = function(error) {
+            console.log("Erro:", error);
+        };
+
+        socket.onclose = function() {
+            document.getElementById("status").textContent = "Desconectado";
+            console.log("Conexão encerrada");
+        };
+
+        function enviarChat() {
+            const campo = document.getElementById("mensagem");
+            const nome = document.getElementById("nome");
+            const texto = (nome.value || "Anônimo") + ": " + campo.value; 
+
+            if (campo.value !== "") {
+                const pacote = {
+                    tipo: "chat",
+                    texto: texto
+                };
+                socket.send(JSON.stringify(pacote));
+                campo.value = "";
+            }
+        }
+
+        function enviarDesenho() {
+            const desenho = canvas.toDataURL();
+
+            const pacote = {
+                tipo: "desenho",
+                desenho: desenho
+            };
+            socket.send(JSON.stringify(pacote));
+        }
+
+        function passarVez() {
+            if (podeDesenhar) {
+                socket.send(JSON.stringify({ tipo: "passar_vez" }));
+            }
+        }
+    </script>
+
+</body>
+</html>
